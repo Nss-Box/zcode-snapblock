@@ -1,0 +1,11 @@
+# Runtime artifacts (generated on the deploying machine, never commit)
+*.log
+*.log.*
+watch-state/
+proxy.env
+setting.json.bak*
+*.bak.*
+
+# Python
+__pycache__/
+*.pyc

@@ -1,0 +1,7 @@
+[Unit]
+Description=zcode-shield: monitor for ZCode repo-snapshot artifacts
+
+[Service]
+Type=oneshot
+# __SHIELD_DIR__ is resolved by install.sh on this machine.
+ExecStart=__SHIELD_DIR__/zcode-snapshot-watch.sh

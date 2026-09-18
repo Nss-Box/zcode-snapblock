@@ -1,0 +1,17 @@
+[Unit]
+Description=zcode-shield: block ZCode repo-snapshot uploads via mitmproxy
+After=network-online.target
+
+[Service]
+Type=simple
+# __MITMDUMP__ / __SHIELD_DIR__ / __PORT__ are resolved by install.sh on this
+# machine. The port is rendered literally: EnvironmentFile-based ${VAR}
+# expansion makes the service unbootable (and loop-restarting, which cuts off
+# a proxied ZCode entirely) if proxy.env is ever missing or empty.
+Environment=ZCODE_SHIELD_DIR=__SHIELD_DIR__
+ExecStart=__MITMDUMP__ -s __SHIELD_DIR__/mitm-addon.py --listen-host 127.0.0.1 --listen-port __PORT__ --set connection_strategy=lazy
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
