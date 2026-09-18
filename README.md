@@ -31,12 +31,17 @@ ZCode 3.12.3 引入了 repo snapshot 机制：每次 prompt / 每轮对话结束
 - 拦截事件追加写入安装目录 `blocked.log`（超 10MB 自动滚动）
 - `httpProxy` 只作用于 zcode-host 的 Host API 通道，不改系统全局代理
 - 仅当 ZCode 重启后读取到代理键才生效——因此启用/禁用脚本都要求先完全退出 ZCode
+- ZCode 保存设置时会从内存模型整体回写 `setting.json`，注入的代理键会被丢弃（无论保存由用户操作还是
+  客户端自动触发）；监控每 30 秒自动补写（仅在代理端口确认监听时，避免把 ZCode 指向死端口）
 
 ## 功能特性
 
 - 路径级拦截，而非整个域名封杀（登录/对话/工具零影响）
 - 后台运行**无窗口、无闪屏**（Windows 通过 wscript 启动器；Linux systemd 用户服务）
-- 崩溃自愈：Windows 30 秒看门狗 + 任务计划重启双保险；Linux `Restart=always`
+- 崩溃自愈：Windows 30 秒看门狗 + 任务计划重启双保险；登录触发延迟 30s，启动器对登录期瞬时失败
+  （0x800704C7）静默重试 6 次，仅持续失败才弹窗告警；Linux `Restart=always`
+- 代理键自愈：ZCode 回写 `setting.json` 丢弃代理键后，监控 30 秒内自动补写（下次启动 ZCode 生效）；
+  `disable-proxy` 置 `proxy-disabled.flag` 暂停自愈，`enable-proxy` 清除该标记恢复
 - 30 秒监控告警（Toast / notify-send + alerts.log，按指纹去重）：
   快照产物文件（`*.tar.gz.enc` / `*.envelope.json`）、`v2/checkpoints` / `v2/repo-snapshots`
   目录出现、当日日志出现 `upload-credential`、拦截证据提示
@@ -121,6 +126,7 @@ curl.exe --ssl-no-revoke -x http://127.0.0.1:18080 --cacert "$env:USERPROFILE\.m
 ## 恢复直连 / 卸载
 
 - **恢复直连**（保留拦截服务）：完全退出 ZCode → `disable-proxy.ps1|.cmd` / `disable-proxy.sh` → 重启 ZCode
+  （Windows 端同时置 `proxy-disabled.flag` 暂停代理键自动补写，重新 enable 后恢复）
 - **Linux 卸载**：先 disable，然后 `./linux/uninstall.sh`（加 `--remove-files` 同时删除 `~/.zcode-shield`）
 - **Windows 卸载**：先 disable，然后 `.\windows\uninstall-zcode-shield.ps1`（加 `-RemoveFiles` 同时删除安装目录）
 - 卸载脚本会在 `setting.json` 仍含 `httpProxy` 时**拒绝执行**，防止把 ZCode 留在断网状态
@@ -144,8 +150,9 @@ curl.exe --ssl-no-revoke -x http://127.0.0.1:18080 --cacert "$env:USERPROFILE\.m
   30 秒 / 5 秒内拉起；应急：按「恢复直连」操作后重启 ZCode。
 - **`no proxy listening on 127.0.0.1:18080`**（enable 拒绝）→ 先跑 `setup` / `install.sh`，
   或检查 `Get-ScheduledTask zcode-shield-mitm` / `systemctl --user status zcode-shield-mitm`。
-- **enable 警告 "ZCode is currently running"** → 设置仅启动时读取且退出时可能被覆盖写回：
-  按提示退出 ZCode → 重跑 enable → 再启动。
+- **enable 警告 "ZCode is currently running"** → 设置仅启动时读取且 ZCode 回写时会丢弃代理键：
+  按提示退出 ZCode → 重跑 enable → 再启动。首次启用后无需重复操作——键被丢弃时监控 30 秒内自动补写，
+  重启 ZCode 即恢复代理（若退出后 30 秒内立即重开可能赶在补写前，稍等片刻即可）。
 - **判断是否生效**：`~/.zcode-shield/blocked.log` 有新行 = 拦截在工作；
   Linux 另看 `journalctl --user -u zcode-shield-mitm -f`（info 级 `server connect` / `GET|POST`
   行可直接确认流量走了代理），Windows 看 `%USERPROFILE%\.zcode-shield\mitmdump.log`。
@@ -172,4 +179,3 @@ curl.exe --ssl-no-revoke -x http://127.0.0.1:18080 --cacert "$env:USERPROFILE\.m
 ## 免责声明
 
 本项目仅供学习研究与个人管理自己账号/设备的网络行为使用，与 Z.ai 无关联。
-修改第三方客户端的网络行为可能违反其服务条款，风险自负；请勿部署到他人设备。

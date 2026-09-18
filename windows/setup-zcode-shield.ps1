@@ -112,8 +112,22 @@ if ($useVbs) {
   $mitmVbs = @'
 ' zcode-shield launcher (generated) - window style 0: fully hidden, no console flash.
 ' Wait=True keeps wscript alive so the task restarts mitmdump on non-zero exit.
+' Process launches can be canceled during early logon (0x800704C7
+' ERROR_CANCELLED) while the session is still initializing; retry silently.
+' The unguarded final Run only surfaces the WSH error popup - the user alert -
+' after every retry has failed, i.e. for persistent failures, not logon races.
 Dim sh : Set sh = CreateObject("WScript.Shell")
-WScript.Quit sh.Run("powershell.exe -NoProfile -ExecutionPolicy Bypass -File ""__RUN__""", 0, True)
+Dim cmd : cmd = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File ""__RUN__"""
+Dim rc, i
+On Error Resume Next
+For i = 1 To 6
+  Err.Clear
+  rc = sh.Run(cmd, 0, True)
+  If Err.Number = 0 Then WScript.Quit rc
+  WScript.Sleep 10000
+Next
+On Error GoTo 0
+WScript.Quit sh.Run(cmd, 0, True)
 '@
   $watchVbs = @'
 ' zcode-shield launcher (generated) - window style 0: fully hidden, no console flash.
@@ -145,6 +159,11 @@ Get-CimInstance Win32_Process -Filter "Name='mitmdump.exe'" -ErrorAction Silentl
   Where-Object { $_.CommandLine -like '*zcode-shield*' } |
   ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 $mitTrigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+# Delay the logon trigger: firing at the exact logon instant races session
+# setup, and a canceled child CreateProcess (0x800704C7) is precisely that
+# failure mode. 30s in, the interactive session is ready; the launcher's own
+# retry loop covers any residual flakiness.
+$mitTrigger.Delay = 'PT30S'
 $mitSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
   -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit (New-TimeSpan -Days 3650)
 Register-ScheduledTask -TaskName 'zcode-shield-mitm' -Action $mitAction -Trigger $mitTrigger `

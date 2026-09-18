@@ -51,6 +51,10 @@ $cfg.httpProxyCaCertPath = $ca
 # UTF8Encoding($false): UTF-8 without BOM, which JSON parsers prefer.
 [System.IO.File]::WriteAllText($SettingPath, ($cfg | ConvertTo-Json -Depth 100), (New-Object System.Text.UTF8Encoding $false))
 
+# Opt back into the monitor's auto-repair (disable-proxy.ps1 sets this flag;
+# see ZcodeSnapshotWatch.ps1 section 5). $PSScriptRoot = the install dir.
+Remove-Item (Join-Path $PSScriptRoot 'proxy-disabled.flag') -Force -ErrorAction SilentlyContinue
+
 Write-Host "[*] enabled: httpProxy=http://127.0.0.1:$ProxyPort  httpProxyCaCertPath=$ca"
 Write-Host "[*] backup : $bak"
 Write-Host "[*] start ZCode now. Verify with:"

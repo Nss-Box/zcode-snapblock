@@ -9,6 +9,12 @@ if (-not (Test-Path $SettingPath)) {
   throw "setting.json not found: $SettingPath (nothing to do)"
 }
 
+# Record intent BEFORE touching the file: running disable at all means "stay
+# direct", so the monitor's auto-repair must stop re-adding the keys on its
+# next 30s tick (ZcodeSnapshotWatch.ps1 section 5 checks this flag).
+# $PSScriptRoot = the install dir.
+New-Item -ItemType File -Path (Join-Path $PSScriptRoot 'proxy-disabled.flag') -Force | Out-Null
+
 try {
   $cfg = Get-Content $SettingPath -Raw -Encoding UTF8 | ConvertFrom-Json
 } catch {

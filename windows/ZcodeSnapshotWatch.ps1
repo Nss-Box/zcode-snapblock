@@ -4,6 +4,7 @@
 param(
   [string]$ZcodeHome = "$env:USERPROFILE\.zcode",
   [string]$ShieldDir = "$env:USERPROFILE\.zcode-shield",
+  [int]$ProxyPort = 18080,
   [int]$LogMaxMB = 10
 )
 $ErrorActionPreference = 'SilentlyContinue'
@@ -87,4 +88,39 @@ if (Test-Path $log) {
 $blocked = Join-Path $ShieldDir 'blocked.log'
 if ((Test-Path $blocked) -and (Get-Item $blocked).Length -gt 0) {
   Alert 'info' 'blocked-evidence' "zcode-shield 已拦截过快照上传请求, 详见 $blocked (拦截=正常防御)"
+}
+
+# 5) self-heal ZCode's proxy keys. ZCode rewrites v2\setting.json from its
+#    in-memory settings model on ANY save (user settings change, project-list /
+#    window-state update, exit), and that serialization drops the injected
+#    httpProxy / httpProxyCaCertPath keys. Re-add them, but ONLY while the
+#    shield proxy is verifiably listening: proxy keys plus a dead proxy is
+#    what severs ZCode's connectivity (the logon failure mode). disable-proxy.ps1
+#    drops proxy-disabled.flag beside this script to opt out of the repair;
+#    enable-proxy.ps1 removes the flag again.
+$settingPath = Join-Path $ZcodeHome 'v2\setting.json'
+if ((Test-Path $settingPath) -and -not (Test-Path (Join-Path $ShieldDir 'proxy-disabled.flag'))) {
+  $portOpen = $false
+  $tcp = New-Object Net.Sockets.TcpClient
+  try {
+    $async = $tcp.BeginConnect('127.0.0.1', $ProxyPort, $null, $null)
+    if ($async.AsyncWaitHandle.WaitOne(500)) { $tcp.EndConnect($async); $portOpen = $true }
+  } catch { } finally { $tcp.Close() }
+  if ($portOpen) {
+    try {
+      $cfg = Get-Content $settingPath -Raw -Encoding UTF8 | ConvertFrom-Json
+      if (-not ($cfg.PSObject.Properties['httpProxy'] -and $cfg.PSObject.Properties['httpProxyCaCertPath'])) {
+        $ca = Join-Path $env:USERPROFILE '.mitmproxy\mitmproxy-ca-cert.pem'
+        if (Test-Path $ca) {
+          Copy-Item $settingPath "$settingPath.bak-shieldrepair" -Force
+          if (-not ($cfg.PSObject.Properties['httpProxy'])) { $cfg | Add-Member NoteProperty httpProxy $null }
+          $cfg.httpProxy = "http://127.0.0.1:$ProxyPort"
+          if (-not ($cfg.PSObject.Properties['httpProxyCaCertPath'])) { $cfg | Add-Member NoteProperty httpProxyCaCertPath $null }
+          $cfg.httpProxyCaCertPath = $ca
+          [System.IO.File]::WriteAllText($settingPath, ($cfg | ConvertTo-Json -Depth 100), (New-Object System.Text.UTF8Encoding $false))
+          Alert 'info' ("proxy-keys-restored:" + (Get-Date -Format 'yyyyMMdd')) "已自动补写 ZCode 代理设置 (下次启动 ZCode 后生效)"
+        }
+      }
+    } catch { }
+  }
 }
